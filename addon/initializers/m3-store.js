@@ -9,17 +9,21 @@ import MegamorphicModelFactory from '../factory';
 import QueryCache from '../query-cache';
 import { flushChanges } from '../utils/notify-changes';
 
+export let recordDataToRecordMap = new WeakMap();
+//TODO we should figure out a place for QC to live
+export let recordDataToQueryCache = new WeakMap();
+
 const STORE_OVERRIDES = {
   _schemaManager: inject('m3-schema-manager'),
 
   init() {
     this._super(...arguments);
     this._queryCache = new QueryCache({ store: this });
-    this._globalM3Cache = new Object(null);
+    this._globalM3CacheRD = new Object(null);
+    this._recordDataToRecordMap = recordDataToRecordMap;
   },
 
   // Store hooks necessary for using a single model class
-
   _hasModelFor(modelName) {
     return get(this, '_schemaManager').includesModel(modelName) || this._super(modelName);
   },
@@ -27,6 +31,20 @@ const STORE_OVERRIDES = {
   _modelFactoryFor(modelName) {
     if (get(this, '_schemaManager').includesModel(modelName)) {
       return MegamorphicModelFactory;
+    }
+    return this._super(modelName);
+  },
+
+  _relationshipsDefinitionFor: function(modelName) {
+    if (get(this, '_schemaManager').includesModel(modelName)) {
+      return Object.create(null);
+    }
+    return this._super(modelName);
+  },
+
+  _attributesDefinitionFor: function(modelName, id) {
+    if (get(this, '_schemaManager').includesModel(modelName)) {
+      return this.recordDataFor(modelName, id).attributesDef();
     }
     return this._super(modelName);
   },
@@ -43,6 +61,21 @@ const STORE_OVERRIDES = {
       return this._super('-ember-m3');
     }
     return this._super(modelName);
+  },
+
+  instantiateRecord(modelName, createOptions, recordData) {
+    recordDataToQueryCache.set(recordData, this._queryCache);
+    // TODO NOW deal with this
+    if (get(this, '_schemaManager').includesModel(modelName)) {
+      delete createOptions.container;
+      delete createOptions.currentState;
+      delete createOptions._internalModel;
+      createOptions._recordData = recordData;
+      let model = new MegamorphicModel(createOptions);
+      //recordDataToRecordMap.set(recordData, model);
+      return model;
+    }
+    return this._super(modelName, createOptions);
   },
 
   /**
@@ -96,28 +129,21 @@ const STORE_OVERRIDES = {
     flushChanges(this);
     return result;
   },
-
-  // These two hooks are used for the secondary cache
-  // TODO: make secondary caches possible via public API
-
-  _pushInternalModel(jsonAPIResource) {
-    let internalModel = this._super(jsonAPIResource);
-    if (get(this, '_schemaManager').includesModel(jsonAPIResource.type)) {
-      this._globalM3Cache[internalModel.id] = internalModel;
-    }
-    return internalModel;
-  },
-
-  _removeFromIdMap(internalModel) {
-    delete this._globalM3Cache[internalModel.id];
-    return this._super(internalModel);
-  },
 };
 
 function createRecordDataFor(modelName, id, clientId, storeWrapper) {
   let schemaManager = get(this, '_schemaManager');
   if (schemaManager.includesModel(modelName)) {
-    return new M3RecordData(modelName, id, clientId, storeWrapper, schemaManager, null, null);
+    return new M3RecordData(
+      modelName,
+      id,
+      clientId,
+      storeWrapper,
+      schemaManager,
+      null,
+      null,
+      this._globalM3CacheRD
+    );
   }
 
   return this._super(modelName, id, clientId, storeWrapper);

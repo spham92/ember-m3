@@ -3,7 +3,7 @@ import { dasherize } from '@ember/string';
 import ArrayProxy from '@ember/array/proxy';
 import { A } from '@ember/array';
 import { EmbeddedMegamorphicModel } from './model';
-import { resolveReferencesWithInternalModels } from './utils/resolve';
+import { resolveReferencesWithRecords } from './utils/resolve';
 
 /**
  * M3RecordArray
@@ -20,7 +20,7 @@ export default class M3RecordArray extends ArrayProxy {
     this.content = A();
     super.init(...arguments);
     this._references = [];
-    this._internalModels = [];
+    this._objects = [];
     this._resolved = false;
     this.store = this.store || null;
   }
@@ -30,26 +30,26 @@ export default class M3RecordArray extends ArrayProxy {
   }
 
   replaceContent(idx, removeAmt, newRecords) {
+    //debugger
     let addAmt = get(newRecords, 'length');
-    let newInternalModels = new Array(addAmt);
+    let newObjects = new Array(addAmt);
 
     if (addAmt > 0) {
       let _newRecords = A(newRecords);
-      for (let i = 0; i < newInternalModels.length; ++i) {
-        newInternalModels[i] = _newRecords.objectAt(i)._internalModel;
+      for (let i = 0; i < newObjects.length; ++i) {
+        newObjects[i] = _newRecords.objectAt(i);
       }
     }
 
-    this.content.replace(idx, removeAmt, newInternalModels);
-    this._registerWithInternalModels(newInternalModels);
+    this.content.replace(idx, removeAmt, newObjects);
+    this._registerWithObjects(newObjects);
     this._resolved = true;
   }
 
   objectAtContent(idx) {
-    let internalModel = this.content[idx];
-    return internalModel !== null && internalModel !== undefined
-      ? internalModel.getRecord()
-      : undefined;
+    // TODO make this lazy again
+    let record = this.content[idx];
+    return record;
   }
 
   objectAt(idx) {
@@ -59,23 +59,30 @@ export default class M3RecordArray extends ArrayProxy {
 
   // RecordArrayManager private api
 
-  _pushInternalModels(internalModels) {
+  _pushObjects(objects) {
+    //debugger
     this._resolve();
-    this.content.pushObjects(internalModels);
+    this.content.pushObjects(objects);
   }
 
-  _removeInternalModels(internalModels) {
+  _removeObjects(objects) {
+    //debugger
     if (this._resolved) {
-      this.content.removeObjects(internalModels);
+      this.content.removeObjects(objects);
     } else {
-      for (let i = 0; i < internalModels.length; ++i) {
-        let internalModel = internalModels[i];
+      for (let i = 0; i < objects.length; ++i) {
+        let object = objects[i];
 
         for (let j = 0; j < this.content.length; ++j) {
           let { id, type } = this.content[j];
           let dtype = type && dasherize(type);
-
-          if ((dtype === null || dtype === internalModel.modelName) && id === internalModel.id) {
+          // TODO we might not need the second condition
+          if (
+            (dtype === null ||
+              dtype === object.modelName ||
+              dtype === object._recordData.modelName) &&
+            id === object.id
+          ) {
             this.content.removeAt(j);
             break;
           }
@@ -86,11 +93,11 @@ export default class M3RecordArray extends ArrayProxy {
 
   // Private API
 
-  _setInternalModels(internalModels, triggerChange = true) {
+  _setObjects(objects, triggerChange = true) {
     if (triggerChange) {
-      this.content.replace(0, this.content.length, internalModels);
+      this.content.replace(0, this.content.length, objects);
     } else {
-      this.content.splice(0, this.content.length, ...internalModels);
+      this.content.splice(0, this.content.length, ...objects);
     }
 
     this.setProperties({
@@ -98,7 +105,7 @@ export default class M3RecordArray extends ArrayProxy {
       isUpdating: false,
     });
 
-    this._registerWithInternalModels(internalModels);
+    this._registerWithObjects(objects);
     this._resolved = true;
   }
 
@@ -110,16 +117,30 @@ export default class M3RecordArray extends ArrayProxy {
     this.content.setObjects(this._references);
   }
 
-  _registerWithInternalModels(internalModels) {
-    for (let i = 0, l = internalModels.length; i < l; i++) {
-      let internalModel = internalModels[i];
+  _removeRecordData(recordData) {
+    for (let i = this.content.length; i >= 0; --i) {
+      let item = this.content.objectAt(i);
+      if (item && recordData === item._recordData) {
+        this.content.removeAt(i);
+        break;
+      }
+    }
+  }
+
+  _registerWithObjects(records) {
+    //debugger;
+    /*
+    for (let i = 0, l = objects.length; i < l; i++) {
+      let object = objects[i];
 
       // allow refs to point to resources not in the store
       // TODO: instead add a schema missing ref hook; #254
-      if (internalModel !== null && internalModel !== undefined) {
-        internalModel._recordArrays.add(this);
+      if (object !== null && object !== undefined) {
+        object._recordArrays.add(this);
       }
     }
+    */
+    records.forEach(record => record && record._recordData._recordArrays.add(this));
   }
 
   _resolve() {
@@ -128,8 +149,8 @@ export default class M3RecordArray extends ArrayProxy {
     }
 
     if (this._references !== null) {
-      let internalModels = resolveReferencesWithInternalModels(this.store, this._references);
-      this._setInternalModels(internalModels, false);
+      let objects = resolveReferencesWithRecords(this.store, this._references);
+      this._setObjects(objects, false);
     }
 
     this._resolved = true;
@@ -158,5 +179,5 @@ export function associateRecordWithRecordArray(record, recordArray) {
     // other tracked array is undefined behaviour
     return;
   }
-  record._internalModel._recordArrays.add(recordArray);
+  record._recordData._recordArrays.add(recordArray);
 }

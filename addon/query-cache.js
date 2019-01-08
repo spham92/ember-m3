@@ -188,15 +188,15 @@ export default class QueryCache {
   }
 
   _createResult(payload, query, array) {
-    let internalModelOrModels = this._store._push(payload);
+    let objectOrModels = this._store._push(payload);
 
     if (array) {
-      array._setInternalModels(internalModelOrModels);
+      array._setObjects(objectOrModels);
       return array;
-    } else if (Array.isArray(internalModelOrModels)) {
-      return this._createQueryArray(internalModelOrModels, query);
+    } else if (Array.isArray(objectOrModels)) {
+      return this._createQueryArray(objectOrModels, query);
     } else {
-      return internalModelOrModels.getRecord();
+      return objectOrModels.getRecord();
     }
   }
 
@@ -216,7 +216,7 @@ export default class QueryCache {
     cacheKeys.push(cacheKey);
   }
 
-  _createQueryArray(internalModels, query) {
+  _createQueryArray(objects, query) {
     let array = M3QueryArray.create({
       modelName: '-ember-m3',
       content: A(),
@@ -227,8 +227,10 @@ export default class QueryCache {
       query,
     });
 
-    array._setInternalModels(internalModels);
+    //TODO make this not eager
+    array._setObjects(objects.map(im => im.getRecord()));
 
+    //TODO deal with this
     this._recordArrayManager._adapterPopulatedRecordArrays.push(array);
 
     return array;

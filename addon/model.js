@@ -2,12 +2,13 @@
 /* eslint-disable ember/no-attrs-in-components */
 
 import DS from 'ember-data';
-import { RootState } from 'ember-data/-private';
+import { RootState, identifierForModel } from 'ember-data/-private';
 import EmberObject, { computed, get, set, defineProperty } from '@ember/object';
 import { isArray } from '@ember/array';
 import { assert, warn } from '@ember/debug';
 import { readOnly } from '@ember/object/computed';
 import { IS_RECORD_DATA } from 'ember-compatibility-helpers';
+import { recordDataToRecordMap } from './initializers/m3-store';
 
 import { recordDataFor } from './-private';
 import M3RecordArray from './record-array';
@@ -33,7 +34,9 @@ const {
 class EmbeddedSnapshot {
   constructor(record) {
     this.record = record;
-    this.modelName = this.record._internalModel.modelName;
+    // TODO this line seems untested
+    this.modelName = this.record._recordData.modelName;
+
     this.attrs = Object.create(null);
     this.eachAttribute(key => (this.attrs[key] = this.record.get(key)));
   }
@@ -43,44 +46,12 @@ class EmbeddedSnapshot {
   }
 
   eachAttribute(callback, binding) {
-    return this.record.eachAttribute(callback, binding);
+    let recordData = recordDataFor(this.record);
+    return recordData.eachAttribute(callback, binding);
   }
 
   attr(key) {
     return this.attrs[key];
-  }
-}
-
-// TODO: shouldn't need this anymore; this level of indirection for nested recordData isn't useful
-export class EmbeddedInternalModel {
-  constructor({ id, modelName, parentInternalModel, parentKey, parentIdx }) {
-    this.id = id;
-    this.modelName = modelName;
-
-    let recordData = recordDataFor(parentInternalModel)._getChildRecordData(
-      parentKey,
-      parentIdx,
-      modelName,
-      id,
-      this
-    );
-    this._recordData = recordData;
-
-    if (!IS_RECORD_DATA) {
-      this._modelData = recordData;
-    }
-
-    this.parentInternalModel = parentInternalModel;
-
-    this.record = null;
-  }
-
-  createSnapshot() {
-    return new EmbeddedSnapshot(this.record);
-  }
-
-  changedAttributes() {
-    return this._recordData.changedAttributes();
   }
 }
 
@@ -98,31 +69,55 @@ class YesManAttributesSingletonClass {
 
 const YesManAttributes = new YesManAttributesSingletonClass();
 
-const retrieveFromCurrentState = computed('_topModel.currentState', function(key) {
-  return this._topModel._internalModel.currentState[key];
-}).readOnly();
-
 // global buffer for initial properties to work around
 //  a)  can't write to `this` before `super`
 //  b)  core_object writes properties before calling `init`; this means that no
 //      CP or setknownProperty can rely on any initialization
 let initProperites = Object.create(null);
 
+let ignoreInvalidRequestsMap = new WeakMap();
+let ignoreErrorRequestsMap = new WeakMap();
 export default class MegamorphicModel extends EmberObject {
   init(properties) {
     // Drop Ember.Object subclassing instead
     super.init(...arguments);
+    recordDataToRecordMap.set(properties._recordData, this);
     this._store = properties.store;
-    this._internalModel = properties._internalModel;
+    this._recordData = properties._recordData;
     this._cache = Object.create(null);
     this._schema = get(properties.store, '_schemaManager');
+    this._invalidRequests = [];
+    this._errorRequests = [];
+    this._lastError = null;
 
     this._topModel = this._topModel || this;
     this._parentModel = this._parentModel || null;
     this._errors = DS.Errors.create();
     this._init = true;
+    this._store.requestCache.subscribe(identifierForModel(this), request => {
+      if (request.state === 'rejected') {
+        // TODO filter out queries
+        this._lastError = request;
+        if (!(request.result && request.result.error instanceof DS.InvalidError)) {
+          this._errorRequests.push(request);
+        } else {
+          this._invalidRequests.push(request);
+        }
+      } else if (request.state === 'fulfilled') {
+        this._invalidRequests = [];
+        this._errorRequests = [];
+        this._lastError = null;
+      }
+      this._notifyNetworkChanges();
+    });
 
     this._flushInitProperties();
+  }
+
+  _notifyNetworkChanges() {
+    ['isSaving', 'isValid', 'isError', 'adapterError', 'isReloading'].forEach(key =>
+      notifyPropertyChange(this, key)
+    );
   }
 
   _flushInitProperties() {
@@ -139,22 +134,26 @@ export default class MegamorphicModel extends EmberObject {
     }
   }
 
+  _markInvalidRequestAsClean() {
+    this._invalidRequests = [];
+    this._notifyNetworkChanges();
+  }
+
+  static get isM3Model() {
+    return true;
+  }
+  /*
   static get isModel() {
     return true;
   }
+  */
 
-  static get klass() {
-    return MegamorphicModel;
+  static create(properties) {
+    return new this(properties);
   }
-
-  static get attributes() {
-    return YesManAttributes;
-  }
-
-  static eachRelationship(/* callback */) {}
 
   get _modelName() {
-    return this._internalModel.modelName;
+    return this._recordData.modelName;
   }
 
   __defineNonEnumerable(property) {
@@ -165,17 +164,6 @@ export default class MegamorphicModel extends EmberObject {
     for (let i = 0, length = keys.length; i < length; i++) {
       this.notifyPropertyChange(keys[i]);
     }
-  }
-
-  _updateCurrentState(state) {
-    if (this !== this._topModel) {
-      this._topModel._updateCurrentState(state);
-      return;
-    }
-    this._internalModel.currentState = state;
-    // currentState is defined on the prototype and will be treated as
-    // non-volatile, so it's safe to eagerly send a change event
-    notifyPropertyChange(this, 'currentState');
   }
 
   notifyPropertyChange(key) {
@@ -218,7 +206,7 @@ export default class MegamorphicModel extends EmberObject {
   }
 
   changedAttributes() {
-    return this._internalModel.changedAttributes();
+    return this._recordData.changedAttributes();
   }
 
   trigger() {}
@@ -231,13 +219,9 @@ export default class MegamorphicModel extends EmberObject {
     return recordDataFor(this)._data;
   }
 
-  eachAttribute(callback, binding) {
-    return recordDataFor(this).eachAttribute(callback, binding);
-  }
-
   unloadRecord() {
     // can't call unloadRecord on nested m3 models
-    this._internalModel.unloadRecord();
+    this.store.unloadRecord(this);
     this._store._queryCache.unloadRecord(this);
   }
 
@@ -246,7 +230,7 @@ export default class MegamorphicModel extends EmberObject {
   }
 
   serialize(options) {
-    return this._internalModel.createSnapshot().serialize(options);
+    return this.store.serializeRecord(this, options);
   }
 
   toJSON() {
@@ -255,7 +239,8 @@ export default class MegamorphicModel extends EmberObject {
 
   save(options) {
     // TODO: we could return a PromiseObject as DS.Model does
-    return this._internalModel.save(options).then(() => this);
+    // this becomes this.store.scheduleSave(identifier)
+    return this.store.scheduleSave(this, options).then(() => this);
   }
 
   reload(options = {}) {
@@ -267,22 +252,21 @@ export default class MegamorphicModel extends EmberObject {
   }
 
   deleteRecord() {
-    let newState = get(this, 'isNew') ? deletedSaved : deletedUncommitted;
-    this._updateCurrentState(newState);
+    recordDataFor(this).setIsDeleted(true);
   }
 
   destroyRecord(options) {
     this.deleteRecord();
-    return this._internalModel.save(options);
+    return this.save(options);
   }
 
   rollbackAttributes() {
+    this._markInvalidRequestAsClean();
     if (DEBUG) {
       assertNoChanges(this._store);
     }
 
     let dirtyKeys = recordDataFor(this).rollbackAttributes();
-    this._updateCurrentState(loadedSaved);
 
     if (dirtyKeys && dirtyKeys.length > 0) {
       this._notifyProperties(dirtyKeys);
@@ -330,12 +314,16 @@ export default class MegamorphicModel extends EmberObject {
   }
 
   get id() {
-    return this._internalModel.id;
+    if (!this._recordData) {
+      return null;
+    }
+    return this._recordData.id;
   }
 
   set id(value) {
+    //TODO need a test for this
     if (!this._init) {
-      this._internalModel.id = value;
+      //this._internalModel.id = value;
       return;
     }
 
@@ -394,10 +382,6 @@ export default class MegamorphicModel extends EmberObject {
 
     let schemaInterface = recordDataFor(this).schemaInterface;
     let isResolved = this._schema.isAttributeResolved(this._modelName, key, value, schemaInterface);
-<<<<<<< HEAD
-=======
-
->>>>>>> Add `isAttributeResolved` schema hook
     if (isResolved) {
       // resolved value, cache directly
       this._cache[key] = value;
@@ -440,20 +424,18 @@ export default class MegamorphicModel extends EmberObject {
 
     const isDirty = recordData.isAttrDirty(attr);
 
+    /*
     if (isDirty && !this.get('isDirty')) {
       this._updateCurrentState(updatedUncommitted);
     }
+    */
   }
 
   _removeError(key) {
     // Remove errors for the property
     this._errors.remove(key);
-    if (
-      this._internalModel.currentState &&
-      !this._internalModel.currentState.isValid &&
-      get(this._errors, 'length') === 0
-    ) {
-      this._updateCurrentState(updatedUncommitted);
+    if (get(this._errors, 'length') === 0) {
+      this._markInvalidRequestAsClean();
     }
   }
 
@@ -474,25 +456,122 @@ export default class MegamorphicModel extends EmberObject {
 
 MegamorphicModel.prototype.store = null;
 MegamorphicModel.prototype._internalModel = null;
+MegamorphicModel.prototype._recordData = null;
 MegamorphicModel.prototype._parentModel = null;
 MegamorphicModel.prototype._topModel = null;
 MegamorphicModel.prototype._errors = null;
+MegamorphicModel.prototype._invalidRequests = null;
+MegamorphicModel.prototype._errorRequests = null;
+MegamorphicModel.prototype._lastError = null;
 MegamorphicModel.prototype.currentState = null;
 MegamorphicModel.prototype.isError = null;
 MegamorphicModel.prototype.adapterError = null;
 
 MegamorphicModel.relationshipsByName = new Map();
 
+/**
+    If this property is `true` the record is in the `valid` state.
+
+    A record will be in the `valid` state when the adapter did not report any
+    server-side validation failures.
+
+    @property isValid
+    @type {Boolean}
+    @readOnly
+  */
+const isValid = computed(function() {
+  if (this.get('errors.length') > 0) {
+    return false;
+  }
+  let invalidLength = this._invalidRequests.length;
+  if (invalidLength === 0) {
+    return true;
+  }
+  let invalidRequest = this._invalidRequests[invalidLength - 1];
+  if (!invalidRequest) {
+    return true;
+  } else {
+    return false;
+  }
+});
+
+/**
+ */
+const isDirty = computed(function() {
+  if (this._topModel !== this) {
+    return this._topModel.get('isDirty');
+  }
+  return (
+    this._recordData.hasChangedAttributes() ||
+    ((this._recordData.isNew() || this._recordData.isDeleted()) &&
+      this._recordData.isNew() !== this._recordData.isDeleted())
+  );
+}).volatile();
+
+const isDeleted = computed(function() {
+  return this._recordData.isDeleted();
+}).volatile();
+
+const isNew = computed(function() {
+  return this._recordData.isNew();
+}).volatile();
+
+const isSaving = computed(function() {
+  let requests = this.store.requestCache.getPendingRequests(identifierForModel(this));
+  return !!requests.find(req => req.request.data.op === 'saveRecord');
+});
+
+const isLoaded = computed(function() {
+  return this._recordData._pushed;
+}).volatile();
+
+const isLoading = computed(function() {
+  return !this.get('isLoaded');
+}).volatile();
+
+const dirtyType = computed(function() {
+  if (this._recordData.isNew()) {
+    return 'created';
+  }
+  if (this._recordData.isDeleted()) {
+    return 'deleted';
+  }
+  if (this._recordData.hasChangedAttributes()) {
+    return 'updated';
+  }
+}).volatile();
+
+const currentState = computed(function() {
+  let stateName = 'root';
+  stateName = stateName + '.loaded';
+  if (this._recordData.hasChangedAttributes()) {
+    stateName = stateName + '.updated.uncommitted';
+  } else {
+    stateName = stateName + '.saved';
+  }
+  return {
+    stateName,
+  };
+}).volatile();
 // STATE PROPS
-defineProperty(MegamorphicModel.prototype, 'isEmpty', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isLoading', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isLoaded', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isSaving', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isDeleted', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isNew', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isValid', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'isDirty', retrieveFromCurrentState);
-defineProperty(MegamorphicModel.prototype, 'dirtyType', retrieveFromCurrentState);
+defineProperty(MegamorphicModel.prototype, 'isLoading', isLoaded);
+defineProperty(MegamorphicModel.prototype, 'isLoaded', isLoading);
+defineProperty(MegamorphicModel.prototype, 'dirtyType', dirtyType);
+
+defineProperty(MegamorphicModel.prototype, 'isDirty', isDirty);
+defineProperty(
+  MegamorphicModel.prototype,
+  'isEmpty',
+  computed(function() {
+    return false;
+  })
+);
+defineProperty(MegamorphicModel.prototype, 'isValid', isValid);
+defineProperty(MegamorphicModel.prototype, 'isDeleted', isDeleted);
+defineProperty(MegamorphicModel.prototype, 'isNew', isNew);
+defineProperty(MegamorphicModel.prototype, 'isSaving', isSaving);
+
+defineProperty(MegamorphicModel.prototype, 'currentState', currentState);
 
 export class EmbeddedMegamorphicModel extends MegamorphicModel {
   save() {
@@ -513,8 +592,6 @@ export class EmbeddedMegamorphicModel extends MegamorphicModel {
       { id: 'ember-m3.nested-model-unloadRecord' }
     );
   }
-
-  // no special behaviour for ids of embedded/nested models
 
   get id() {
     return this.unknownProperty('id');
