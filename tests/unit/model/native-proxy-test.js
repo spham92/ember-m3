@@ -1,3 +1,4 @@
+import { run } from '@ember/runloop';
 import { test, skip, module } from 'qunit';
 import { setupTest, setupRenderingTest } from 'ember-qunit';
 import { render } from '@ember/test-helpers';
@@ -70,11 +71,30 @@ module('unit/model/native-proxy', function () {
 
     test('can render content', async function (assert) {
       this.book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
-      debugger;
 
       await render(hbs`{{this.book.title}}`);
 
       assert.strictEqual(this.element.textContent, 'How to Win Friends and Influence People');
+    });
+
+    test('updates content on change', async function (assert) {
+      this.book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      await render(hbs`{{this.book.title}}`);
+
+      await run(() =>
+        this.store.push({
+          data: {
+            id: 'urn:li:book:1',
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              title: 'The Way Things Work',
+            },
+          },
+        })
+      );
+
+      assert.strictEqual(this.element.textContent, 'The Way Things Work');
     });
   });
 });

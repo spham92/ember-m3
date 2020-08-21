@@ -16,6 +16,7 @@ import {
   recordDataToRecordMap,
   recordDataToQueryCache,
   recordToRecordArrayMap,
+  recordToRecordDataMap,
 } from '../utils/caches';
 import { createModel, M3ModelBrand } from '../-private/model/native-proxy';
 
@@ -158,7 +159,10 @@ export default class M3Store extends Store {
     if (schemaManager.includesModel(modelName)) {
       // TODO: add a build time flag
       if (CUSTOM_MODEL_CLASS && this.useProxy) {
-        return createModel(identifier, recordData, this, schemaManager);
+        const record = createModel(identifier, recordData, this, schemaManager);
+        recordToRecordDataMap.set(record, recordData);
+        recordDataToRecordMap.set(recordData, record);
+        return record;
       } else {
         let createOptions = emberAssign({ _recordData: recordData, store: this }, createRecordArgs);
 

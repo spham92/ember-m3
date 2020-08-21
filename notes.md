@@ -23,3 +23,4 @@ issues
 
 - ember-data assumes taht all model's have a `.get` function, and that they use `isDestroyed`/`isDestroying` properties
 - ember-data `getRecord` assumes `.trigger` is present on the model
+- ember-data assumes `_notifyProperties` to invalidate the record's cached props

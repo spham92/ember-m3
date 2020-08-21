@@ -1,9 +1,11 @@
 import { resolveValue } from '../../resolve-attribute-util';
+import { get, notifyPropertyChange } from '@ember/object';
 export const M3ModelBrand = Symbol('M3 Model');
 
 export function createModel(identifier, recordData, store, schemaManager) {
   let model = Object.create(null);
   let cachedAttributes = Object.create(null);
+  let modelName = identifier.type;
 
   return new Proxy(model, {
     // TODO: do stuff
@@ -17,18 +19,30 @@ export function createModel(identifier, recordData, store, schemaManager) {
           return !!recordData.isDestroying;
         case 'get':
           // TODO: issue a deprecation
-          return (property) => receiver[property];
+          // use Ember's get() to handle paths
+          return (property) => get(receiver, property);
 
         // TODO: this should not be needed, ember-data should not be calling `.trigger` in CUSTOM_MODEL_CLASS
         case 'trigger':
           return () => {};
+        case '_notifyProperties':
+          return (keys) => {
+            for (let i = 0, length = keys.length; i < length; i++) {
+              if (!schemaManager.isAttributeIncluded(modelName, keys[i])) {
+                return;
+              }
+
+              if (keys[i] in cachedAttributes) {
+                delete cachedAttributes[keys[i]];
+              }
+              notifyPropertyChange(receiver, keys[i]);
+            }
+          };
 
         default: {
           if (property in cachedAttributes) {
             return cachedAttributes[property];
           }
-
-          let modelName = identifier.type;
 
           // TODO: bring this back
           if (!schemaManager.isAttributeIncluded(modelName, property)) {
@@ -55,7 +69,6 @@ export function createModel(identifier, recordData, store, schemaManager) {
 
           let value = schemaManager.transformValue(modelName, property, rawValue);
 
-          debugger;
           return (cachedAttributes[property] = resolveValue(
             property,
             value,
