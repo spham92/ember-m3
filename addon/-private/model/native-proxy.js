@@ -1,12 +1,11 @@
 import { resolveValue } from '../../resolve-attribute-util';
-import { recordDataFor } from 'ember-m3/-private';
 import { get, notifyPropertyChange } from '@ember/object';
 export const M3ModelBrand = Symbol('M3 Model');
 
 export function createModel(identifier, recordData, store, schemaManager) {
   let model = Object.create(null);
   let cachedAttributes = Object.create(null);
-  let modelName = identifier.type;
+  let { type: modelName } = identifier;
 
   // Must be compatible getter function as used in Object.defineProperty()
   function getAttribute(property) {

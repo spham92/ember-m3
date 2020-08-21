@@ -12,6 +12,8 @@ import {
   getOrCreateRecordFromRecordData,
   resolveReferencesWithInternalModels,
 } from './utils/resolve';
+import { createModel } from './-private/model/native-proxy';
+import { recordToRecordDataMap, recordDataToRecordMap } from './utils/caches';
 import { CUSTOM_MODEL_CLASS } from 'ember-m3/-infra/features';
 
 let EmbeddedInternalModel;
@@ -259,7 +261,17 @@ function createNestedModel(store, record, recordData, key, nestedValue, parentId
   }
 
   let nestedModel;
-  if (CUSTOM_MODEL_CLASS) {
+  if (CUSTOM_MODEL_CLASS && store.useProxy) {
+    // TODO Make it read-only ala Ember Data?
+    const identifier = {
+      id: nestedValue.id,
+      type: modelName,
+    };
+    // TODO Should this happen in the store, so we can co-locate the management of the record to record data mappings
+    nestedModel = createModel(identifier, nestedRecordData, store, store._schemaManager);
+    recordToRecordDataMap.set(nestedModel, nestedRecordData);
+    recordDataToRecordMap.set(nestedRecordData, nestedModel);
+  } else if (CUSTOM_MODEL_CLASS) {
     nestedModel = EmbeddedMegamorphicModel.create({
       store,
       _parentModel: record,
