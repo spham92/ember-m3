@@ -28,6 +28,7 @@ module('unit/model/native-proxy', function () {
           type: 'com.example.bookstore.Book',
           attributes: {
             title: 'How to Win Friends and Influence People',
+            author: 'Dale Carnegie',
           },
         },
       });
@@ -37,6 +38,19 @@ module('unit/model/native-proxy', function () {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
       assert.strictEqual(book.title, 'How to Win Friends and Influence People');
+    });
+
+    test('can use with object spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const obj = {
+        ...book,
+      };
+
+      assert.deepEqual(obj, {
+        title: 'How to Win Friends and Influence People',
+        author: 'Dale Carnegie',
+      });
     });
 
     skip('test using an array attribute');
