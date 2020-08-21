@@ -17,6 +17,7 @@ import {
   recordDataToQueryCache,
   recordToRecordArrayMap,
 } from '../utils/caches';
+import { createModel, M3ModelBrand } from '../-private/model/native-proxy';
 
 const emberAssign = assign || merge;
 
@@ -148,34 +149,48 @@ export default class M3Store extends Store {
   }
 
   instantiateRecord(identifier, createRecordArgs, recordDataFor, notificationManager) {
-    let recordData = recordDataFor(identifier);
-    recordDataToQueryCache.set(recordData, this._queryCache);
     let modelName = identifier.type;
-    if (get(this, '_schemaManager').includesModel(modelName)) {
-      let createOptions = emberAssign({ _recordData: recordData, store: this }, createRecordArgs);
-      // TODO remove the megamorphicModelFactory
-      let record = MegamorphicModelFactory.create(createOptions);
-      notificationManager.subscribe(identifier, (_identifier, value) => {
-        if (value === 'state') {
-          record.notifyPropertyChange('isNew');
-          record.notifyPropertyChange('isDeleted');
-        } else if (value === 'identity') {
-          record.notifyPropertyChange('id');
-        }
-      });
-      record._setIdentifier(identifier);
-      return record;
+    let recordData = recordDataFor(identifier);
+
+    recordDataToQueryCache.set(recordData, this._queryCache);
+
+    let schemaManager = get(this, '_schemaManager');
+    if (schemaManager.includesModel(modelName)) {
+      // TODO: add a build time flag
+      if (CUSTOM_MODEL_CLASS && this.useProxy) {
+        return createModel(identifier, recordData, this, schemaManager);
+      } else {
+        let createOptions = emberAssign({ _recordData: recordData, store: this }, createRecordArgs);
+
+        // TODO remove the megamorphicModelFactory
+        let record = MegamorphicModelFactory.create(createOptions);
+        notificationManager.subscribe(identifier, (_identifier, value) => {
+          if (value === 'state') {
+            record.notifyPropertyChange('isNew');
+            record.notifyPropertyChange('isDeleted');
+          } else if (value === 'identity') {
+            record.notifyPropertyChange('id');
+          }
+        });
+        record._setIdentifier(identifier);
+        return record;
+      }
     }
     return super.instantiateRecord(...arguments);
   }
 
   teardownRecord(record) {
-    if (!(record instanceof MegamorphicModelFactory.class)) {
+    // TODO: does this error when not using native proxy mode?
+    //   probably have to add this brand to M3Model too...
+    if (CUSTOM_MODEL_CLASS && record[M3ModelBrand]) {
+      return;
+    } else if (!(record instanceof MegamorphicModelFactory.class)) {
       let recordArrays = recordToRecordArrayMap.get(record);
       if (recordArrays) {
         recordArrays.forEach((recordArray) => recordArray._removeObject(record));
       }
     }
+
     return super.teardownRecord(record);
   }
 
