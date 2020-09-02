@@ -44,6 +44,63 @@ module('unit/model/native-proxy', function () {
           attributes: {
             title: 'How to Win Friends and Influence People',
             author: 'Dale Carnegie',
+            tags: ['self-help', 'best-seller'],
+          },
+        },
+      });
+    });
+
+    test('can access attribute without get', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      assert.strictEqual(book.title, 'How to Win Friends and Influence People');
+    });
+
+    test('can access array attribute without get', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      assert.deepEqual(book.tags, ['self-help', 'best-seller']);
+    });
+
+    test('can use with object spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const obj = {
+        ...book,
+      };
+
+      assert.deepEqual(obj, {
+        title: 'How to Win Friends and Influence People',
+        author: 'Dale Carnegie',
+        tags: ['self-help', 'best-seller'],
+      });
+    });
+
+    test('can use with array spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const objs = [...book.tags];
+
+      assert.deepEqual(objs, ['self-help', 'best-seller']);
+    });
+  });
+
+  module('nested models', function (hooks) {
+    setupTest(hooks);
+
+    hooks.beforeEach(function () {
+      this.store = this.owner.lookup('service:store');
+      this.store.useProxy = true;
+
+      this.owner.register('service:m3-schema', TestSchema);
+
+      this.store.push({
+        data: {
+          id: 'urn:li:book:1',
+          type: 'com.example.bookstore.Book',
+          attributes: {
+            title: 'How to Win Friends and Influence People',
+            author: 'Dale Carnegie',
             metadata: {
               isbn: '1-4391-6734-6',
             },
@@ -58,19 +115,13 @@ module('unit/model/native-proxy', function () {
       });
     });
 
-    test('can access attribute without get', function (assert) {
-      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
-
-      assert.strictEqual(book.title, 'How to Win Friends and Influence People');
-    });
-
     test('can access nested model without get', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
       assert.strictEqual(book.metadata.isbn, '1-4391-6734-6');
     });
 
-    test('test using an array attribute', function (assert) {
+    test('can access array of nested model without get', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
       assert.equal(book.similarBooks.length, 1);
@@ -84,21 +135,50 @@ module('unit/model/native-proxy', function () {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
       const obj = {
-        ...book,
+        ...book.metadata,
       };
 
       assert.deepEqual(obj, {
-        title: 'How to Win Friends and Influence People',
-        author: 'Dale Carnegie',
-        metadata: {
-          isbn: '1-4391-6734-6',
+        isbn: '1-4391-6734-6',
+      });
+    });
+
+    test('can use with array spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const objs = [...book.similarBooks];
+
+      assert.deepEqual(objs, [
+        {
+          title: 'The Quick and Easy Way to Effective Speaking',
+          author: 'Dale Carnegie',
         },
-        similarBooks: [
-          {
+      ]);
+    });
+  });
+
+  module('references', function (hooks) {
+    hooks.beforeEach(function ß() {
+      this.store = this.owner.lookup('service:store');
+      this.store.useProxy = true;
+
+      this.owner.register('service:m3-schema', TestSchema);
+
+      this.store.push({
+        data: {
+          id: 'urn:li:book:1',
+          type: 'com.example.bookstore.Book',
+          attributes: {
+            title: 'How to Win Friends and Influence People',
             author: 'Dale Carnegie',
-            title: 'The Quick and Easy Way to Effective Speaking',
+            similarBooks: [
+              {
+                title: 'The Quick and Easy Way to Effective Speaking',
+                author: 'Dale Carnegie',
+              },
+            ],
           },
-        ],
+        },
       });
     });
   });
