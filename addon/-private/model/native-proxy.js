@@ -1,4 +1,9 @@
-import { resolveValue } from '../../resolve-attribute-util';
+import {
+  computeAttributeValue,
+  resolveReference,
+  resolveNestedModel,
+} from '../../resolve-attribute-util';
+import { schemaTypesInfo, NESTED, REFERENCE, MANAGED_ARRAY } from '../../utils/schema-types-info';
 import { get, notifyPropertyChange } from '@ember/object';
 export const M3ModelBrand = Symbol('M3 Model');
 
@@ -6,6 +11,55 @@ export function createModel(identifier, recordData, store, schemaManager) {
   let model = Object.create(null);
   let cachedAttributes = Object.create(null);
   let { type: modelName } = identifier;
+
+  function wrapComputedValue(computedValue, key, parentIdx) {
+    // wrap the value correctly
+    if (
+      computedValue !== null &&
+      typeof computedValue === 'object' &&
+      computedValue[M3ModelBrand]
+    ) {
+      // Resolved models in the record data should only be possible when the model is modified through `set`, which is
+      // not supported for native proxies for now
+      throw new Error(
+        `M3 native proxy doesn't allow computed value from the schema to be a resolved model`
+      );
+    }
+
+    let valueType = schemaTypesInfo.get(computedValue);
+
+    switch (valueType) {
+      case MANAGED_ARRAY:
+        // native proxies doesn't support managed arrays for the moment, everything is eagerly serialized
+        return computedValue.map((el, idx) => wrapComputedValue(el, key, idx));
+      case REFERENCE:
+        return resolveReference(computedValue, store);
+      case NESTED:
+        return resolveNestedModel(
+          computedValue,
+          key,
+          store,
+          null /* the record itself is not used in the case of CUSTOM_MODEL */,
+          recordData,
+          parentIdx
+        );
+      default:
+        return computedValue;
+    }
+  }
+
+  function resolveAttribute(property, value) {
+    let computedValue = computeAttributeValue(
+      property,
+      value,
+      modelName,
+      store,
+      schemaManager,
+      recordData
+    );
+
+    return wrapComputedValue(computedValue, property, null);
+  }
 
   // Must be compatible getter function as used in Object.defineProperty()
   function getAttribute(property) {
@@ -38,15 +92,7 @@ export function createModel(identifier, recordData, store, schemaManager) {
 
     let value = schemaManager.transformValue(modelName, property, rawValue);
 
-    return (cachedAttributes[property] = resolveValue(
-      property,
-      value,
-      modelName,
-      store,
-      schemaManager,
-      // TODO: this is wrong, but YOLO
-      this
-    ));
+    return (cachedAttributes[property] = resolveAttribute(property, value, this));
   }
 
   return new Proxy(model, {

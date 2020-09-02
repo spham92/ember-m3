@@ -157,7 +157,7 @@ export default class M3Store extends Store {
 
     let schemaManager = get(this, '_schemaManager');
     if (schemaManager.includesModel(modelName)) {
-      // TODO: add a build time flag
+      // TODO: add a build time flag once all or majority of tests are passing
       if (CUSTOM_MODEL_CLASS && this.useProxy) {
         const record = createModel(identifier, recordData, this, schemaManager);
         recordToRecordDataMap.set(record, recordData);

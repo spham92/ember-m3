@@ -69,29 +69,34 @@ function resolveSingleValue(computedValue, key, store, record, recordData, paren
 
   let valueType = schemaTypesInfo.get(computedValue);
   if (valueType === REFERENCE) {
-    let reference = computedValue;
-    let { id } = reference;
-    if (reference.type === null) {
-      // for schemas with a global id-space but multiple types, schemas may
-      // report a type of null
-      if (CUSTOM_MODEL_CLASS) {
-        let rd = store._globalM3RecordDataCache[reference.id];
-        return rd ? getOrCreateRecordFromRecordData(rd, store) : null;
-      } else {
-        let internalModel = store._globalM3Cache[id];
-        return internalModel ? internalModel.getRecord() : null;
-      }
-    } else {
-      // respect the user schema's type if provided
-      return id !== null && id !== undefined
-        ? store.peekRecord(reference.type, reference.id)
-        : null;
-    }
+    return resolveReference(computedValue, store);
   } else if (valueType === NESTED) {
-    return createNestedModel(store, record, recordData, key, computedValue, parentIdx);
+    return resolveNestedModel(computedValue, key, store, record, recordData, parentIdx);
   } else {
     return computedValue;
   }
+}
+
+export function resolveReference(reference, store) {
+  let { id } = reference;
+  if (reference.type === null) {
+    // for schemas with a global id-space but multiple types, schemas may
+    // report a type of null
+    if (CUSTOM_MODEL_CLASS) {
+      let rd = store._globalM3RecordDataCache[reference.id];
+      return rd ? getOrCreateRecordFromRecordData(rd, store) : null;
+    } else {
+      let internalModel = store._globalM3Cache[id];
+      return internalModel ? internalModel.getRecord() : null;
+    }
+  } else {
+    // respect the user schema's type if provided
+    return id !== null && id !== undefined ? store.peekRecord(reference.type, reference.id) : null;
+  }
+}
+
+export function resolveNestedModel(computedValue, key, store, record, recordData, parentIdx) {
+  return createNestedModel(store, record, recordData, key, computedValue, parentIdx);
 }
 
 export function resolveRecordArray(store, record, key, references) {
@@ -129,9 +134,36 @@ export function resolveRecordArray(store, record, key, references) {
  */
 export function resolveValue(key, value, modelName, store, schema, record, parentIdx) {
   const recordData = recordDataFor(record);
+
+  let computedValue = computeAttributeValue(key, value, modelName, store, schema, recordData);
+
+  let valueType = schemaTypesInfo.get(computedValue);
+
+  if (valueType === REFERENCE || valueType === NESTED) {
+    return resolveSingleValue(computedValue, key, store, record, recordData, parentIdx);
+  } else if (valueType === MANAGED_ARRAY) {
+    if (schemaTypesInfo.get(computedValue[0]) === REFERENCE) {
+      return resolveRecordArray(store, record, key, computedValue);
+    } else {
+      let content = computedValue.map((v, i) =>
+        resolveSingleValue(v, key, store, record, recordData, i)
+      );
+      return resolveManagedArray(content, key, value, modelName, store, schema, record);
+    }
+  } else if (Array.isArray(computedValue)) {
+    return computedValue.map((v, i) => resolveSingleValue(v, key, store, record, recordData, i));
+  } else if (computedValue) {
+    return computedValue;
+  } else {
+    return value;
+  }
+}
+
+export function computeAttributeValue(key, value, modelName, store, schema, recordData) {
   const schemaInterface = recordData.schemaInterface;
 
   let computedValue;
+
   if (schema.useComputeAttribute()) {
     computedValue = computeAttribute(key, value, modelName, schemaInterface, schema);
   } else {
@@ -164,30 +196,14 @@ export function resolveValue(key, value, modelName, store, schema, record, paren
         // If computeNestedModel returned null, we used to iterate the value array manually
         // and process each element individually
       } else if (Array.isArray(value)) {
-        let content = value.map((v, i) =>
-          transferOrResolveValue(store, schema, record, recordData, modelName, key, v, i)
+        let content = value.map(
+          (v, i) => transferOrComputeValue(key, v, modelName, store, schema, recordData, i) // TODO What do we do for `useComputedAttribute()`, which will encounter embedded models
         );
-        return resolveManagedArray(content, key, value, modelName, store, schema, record);
+        computedValue = schemaInterface.managedArray(content);
       }
     }
   }
-
-  let valueType = schemaTypesInfo.get(computedValue);
-
-  if (valueType === REFERENCE || valueType === NESTED) {
-    return resolveSingleValue(computedValue, key, store, record, recordData, parentIdx);
-  } else if (valueType === MANAGED_ARRAY) {
-    if (schemaTypesInfo.get(computedValue[0]) === REFERENCE) {
-      return resolveRecordArray(store, record, key, computedValue);
-    } else {
-      let content = computedValue.map((v, i) =>
-        resolveSingleValue(v, key, store, record, recordData, i)
-      );
-      return resolveManagedArray(content, key, value, modelName, store, schema, record);
-    }
-  } else if (Array.isArray(computedValue)) {
-    return computedValue.map((v, i) => resolveSingleValue(v, key, store, record, recordData, i));
-  } else if (computedValue) {
+  if (computedValue != null) {
     return computedValue;
   } else {
     return value;
@@ -224,14 +240,14 @@ function resolveManagedArray(content, key, value, modelName, store, schema, reco
   }
 }
 
-function transferOrResolveValue(store, schema, record, recordData, modelName, key, value, index) {
+function transferOrComputeValue(key, value, modelName, store, schema, recordData, index) {
   if (value instanceof EmbeddedMegamorphicModel) {
     // transfer ownership to the new RecordData
     recordData._setChildRecordData(key, index, recordDataFor(value));
     return value;
   }
 
-  return resolveValue(key, value, modelName, store, schema, record, index);
+  return computeAttributeValue(key, value, modelName, store, schema, recordData, index);
 }
 
 function createNestedModel(store, record, recordData, key, nestedValue, parentIdx = null) {

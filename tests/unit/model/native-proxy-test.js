@@ -47,6 +47,12 @@ module('unit/model/native-proxy', function () {
             metadata: {
               isbn: '1-4391-6734-6',
             },
+            similarBooks: [
+              {
+                title: 'The Quick and Easy Way to Effective Speaking',
+                author: 'Dale Carnegie',
+              },
+            ],
           },
         },
       });
@@ -64,8 +70,14 @@ module('unit/model/native-proxy', function () {
       assert.strictEqual(book.metadata.isbn, '1-4391-6734-6');
     });
 
-    skip('test using an array attribute', function (assert) {
+    test('test using an array attribute', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      assert.equal(book.similarBooks.length, 1);
+      assert.strictEqual(
+        book.similarBooks[0].title,
+        'The Quick and Easy Way to Effective Speaking'
+      );
     });
 
     test('can use with object spread', function (assert) {
@@ -81,6 +93,12 @@ module('unit/model/native-proxy', function () {
         metadata: {
           isbn: '1-4391-6734-6',
         },
+        similarBooks: [
+          {
+            author: 'Dale Carnegie',
+            title: 'The Quick and Easy Way to Effective Speaking',
+          },
+        ],
       });
     });
   });
