@@ -1,5 +1,5 @@
 import { run } from '@ember/runloop';
-import { test, skip, module } from 'qunit';
+import { test, module } from 'qunit';
 import { setupTest, setupRenderingTest } from 'ember-qunit';
 import { render } from '@ember/test-helpers';
 import { hbs } from 'ember-cli-htmlbars';
@@ -24,6 +24,16 @@ class TestSchema extends DefaultSchema {
         attributes: value,
       };
     }
+  }
+
+  computeAttributeReference(key, value) {
+    if (typeof value === 'string' && value.startsWith('urn:li:')) {
+      return {
+        id: value,
+        type: null,
+      };
+    }
+    return null;
   }
 }
 
@@ -115,13 +125,13 @@ module('unit/model/native-proxy', function () {
       });
     });
 
-    test('can access nested model without get', function (assert) {
+    test('can access without get', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
       assert.strictEqual(book.metadata.isbn, '1-4391-6734-6');
     });
 
-    test('can access array of nested model without get', function (assert) {
+    test('can access array without get', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
       assert.equal(book.similarBooks.length, 1);
@@ -158,7 +168,9 @@ module('unit/model/native-proxy', function () {
   });
 
   module('references', function (hooks) {
-    hooks.beforeEach(function ß() {
+    setupTest(hooks);
+
+    hooks.beforeEach(function () {
       this.store = this.owner.lookup('service:store');
       this.store.useProxy = true;
 
@@ -170,16 +182,74 @@ module('unit/model/native-proxy', function () {
           type: 'com.example.bookstore.Book',
           attributes: {
             title: 'How to Win Friends and Influence People',
-            author: 'Dale Carnegie',
-            similarBooks: [
-              {
-                title: 'The Quick and Easy Way to Effective Speaking',
-                author: 'Dale Carnegie',
-              },
-            ],
+            author: 'urn:li:author:1',
+            similarBooks: ['urn:li:book:2'],
           },
         },
+        included: [
+          {
+            id: 'urn:li:author:1',
+            type: 'com.example.bookstore.Author',
+            attributes: {
+              name: 'Dale Carnegie',
+            },
+          },
+          {
+            id: 'urn:li:book:2',
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              title: 'The Quick and Easy Way to Effective Speaking',
+              author: 'urn:li:author:1',
+            },
+          },
+        ],
       });
+    });
+
+    test('can access without get', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      assert.strictEqual(book.author.name, 'Dale Carnegie');
+    });
+
+    test('can access array without get', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      assert.equal(book.similarBooks.length, 1);
+      assert.strictEqual(
+        book.similarBooks[0].title,
+        'The Quick and Easy Way to Effective Speaking'
+      );
+    });
+
+    test('can use with object spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const obj = {
+        ...book.author,
+      };
+
+      assert.deepEqual(obj, {
+        name: 'Dale Carnegie',
+      });
+    });
+
+    test('can use with array spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const similarBook = book.similarBooks[0];
+      const objs = [...book.similarBooks];
+
+      assert.deepEqual(objs, [similarBook]);
+    });
+
+    test('maintains reference identity', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      const author = book.author;
+      const similarBookAuthor = book.similarBooks[0].author;
+
+      assert.strictEqual(author, similarBookAuthor);
     });
   });
 
