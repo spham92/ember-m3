@@ -271,6 +271,14 @@ module('unit/model/native-proxy', function () {
             metadata: {
               isbn: '1-4391-6734-6',
             },
+            translations: [
+              {
+                title: 'Wie Man Freunde Gewinnt',
+              },
+              {
+                title: 'Comment Se Faire Des Amis',
+              },
+            ],
           },
         },
       });
@@ -324,6 +332,42 @@ module('unit/model/native-proxy', function () {
       );
 
       assert.strictEqual(this.element.textContent, '0-395-42857-2');
+    });
+
+    test('updates content on array of nested model change', async function (assert) {
+      this.book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      await render(hbs`
+      <ul>
+      {{#each this.book.translations as |translation|}}
+        <li>{{translation.title}}</li>
+      {{/each}}
+      </ul>
+      `);
+
+      await run(() =>
+        this.store.push({
+          data: {
+            id: 'urn:li:book:1',
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              translations: [
+                {
+                  title: 'Wie Man Freunde Gewinnt',
+                },
+                {
+                  title: 'Comment Se Faire Des Amis',
+                },
+              ],
+            },
+          },
+        })
+      );
+
+      const translations = Array.from(this.element.querySelectorAll('li')).map(
+        (li) => li.textContent
+      );
+      assert.deepEqual(translations, ['Wie Man Freunde Gewinnt', 'Comment Se Faire Des Amis']);
     });
   });
 });
