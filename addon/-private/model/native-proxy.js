@@ -10,6 +10,8 @@ export const M3ModelBrand = Symbol('M3 Model');
 export function createModel(identifier, recordData, store, schemaManager) {
   let model = Object.create(null);
   let cachedAttributes = Object.create(null);
+  let cachedKeys = null;
+
   let { type: modelName } = identifier;
 
   function wrapComputedValue(computedValue, key, parentIdx) {
@@ -115,6 +117,9 @@ export function createModel(identifier, recordData, store, schemaManager) {
           return () => {};
         case '_notifyProperties':
           return (keys) => {
+            // keep it simple for now and just invalidate the cached keys
+            cachedKeys = null;
+
             for (let i = 0, length = keys.length; i < length; i++) {
               if (!schemaManager.isAttributeIncluded(modelName, keys[i])) {
                 return;
@@ -133,12 +138,15 @@ export function createModel(identifier, recordData, store, schemaManager) {
     },
 
     ownKeys() {
+      if (cachedKeys !== null) {
+        return cachedKeys;
+      }
       let collectKeys = [];
       // TODO Should we have more optimal API to get the keys?
       recordData.eachAttribute((key) => {
         collectKeys.push(key);
       });
-      return collectKeys;
+      return (cachedKeys = collectKeys);
     },
 
     getOwnPropertyDescriptor(target, property) {

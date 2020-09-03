@@ -86,6 +86,37 @@ module('unit/model/native-proxy', function () {
       });
     });
 
+    test('new keys are available for object spread', function (assert) {
+      let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+
+      let obj = {
+        ...book,
+      };
+
+      run(() =>
+        this.store.push({
+          data: {
+            id: 'urn:li:book:1',
+            type: 'com.example.bookstore.Book',
+            attributes: {
+              year: 1936,
+            },
+          },
+        })
+      );
+
+      obj = {
+        ...book,
+      };
+
+      assert.deepEqual(obj, {
+        title: 'How to Win Friends and Influence People',
+        author: 'Dale Carnegie',
+        tags: ['self-help', 'best-seller'],
+        year: 1936,
+      });
+    });
+
     test('can use with array spread', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
 
