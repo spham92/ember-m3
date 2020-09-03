@@ -186,15 +186,11 @@ module('unit/model/native-proxy', function () {
 
     test('can use with array spread', function (assert) {
       let book = this.store.peekRecord('com.example.bookstore.Book', 'urn:li:book:1');
+      let similarBook = book.similarBooks[0];
 
       const objs = [...book.similarBooks];
 
-      assert.deepEqual(objs, [
-        {
-          title: 'The Quick and Easy Way to Effective Speaking',
-          author: 'Dale Carnegie',
-        },
-      ]);
+      assert.deepEqual(objs, [similarBook]);
     });
   });
 
